@@ -24,23 +24,27 @@
  *
  * This is a Demo for a LNCV outputs and sound module.
  *
+ * VERSION 8
+ * Configurable intensity for each fade output
+ * Check if output already ON or OFF to skyp fade if necessary
  ******************************************************************************/
 // uncomment this to debug
-//#define DEBUG
+#define DEBUG
 
-#define MAJORVERSION 7
+#define MAJORVERSION 8
 #define MINORVERSION 0
 
 #define LOCONET_TX_PIN 7
 #define ARTNR 9001
 #define LNCV_COUNT 80
 
-#define LNCV_FIRSTSOUND 35
-#define LNCV_NUMSOUNDS 36
-#define LNCV_MASTERVOL 37
-#define LNCV_SOUNDSOURCE 38
-#define LNCV_STOPSOUND 39
-#define LNCV_PLAYRANDOM 40
+#define LNCV_FADESPEED 40
+#define LNCV_FIRSTSOUND 41
+#define LNCV_NUMSOUNDS 42
+#define LNCV_MASTERVOL 43
+#define LNCV_SOUNDSOURCE 44
+#define LNCV_STOPSOUND 45
+#define LNCV_PLAYRANDOM 46
 #define LNCV_SNDCFG_OFFSET 50
 
 #define LNCV_COMMAND 100
@@ -71,7 +75,7 @@ uint8_t myPins[] = {2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19};
 void setup()
 {
   uint8_t i = 0;
-
+  
   /*----------------------------------------------*/
   /*  Configuracion Loconet                       */
   /*----------------------------------------------*/
@@ -117,11 +121,10 @@ void setup()
       MP3_source = MP3_UDISK;
   }
 
-  #ifdef DEBUG
   Serial.print("Starting module 90010 Address "); Serial.println(lncv[0]);
   Serial.print("Version "); Serial.print(MAJORVERSION); Serial.print("."); Serial.println(MINORVERSION);
-  Serial.print("Daniel Guisado - http://www.clubncaldes.com");
-  #endif
+  Serial.println("Daniel Guisado - http://www.clubncaldes.com");
+
 }
 
 /*************************************************************************/
@@ -147,10 +150,11 @@ void loop()
 /*************************************************************************/
 void commitLNCVUpdate() {
   #ifdef DEBUG
-    Serial.print("Module Address is now: ");
+    Serial.print("LNCV Commit Update, module Address is now: ");
     Serial.print(lncv[0]);
     Serial.print("\n");
   #endif
+  saveSettings();
 }
 
 int8_t notifyLNCVread(uint16_t ArtNr, uint16_t lncvAddress, uint16_t, uint16_t & lncvValue)
@@ -317,6 +321,10 @@ void notifyLNCVprogrammingStop(uint16_t ArtNr, uint16_t ModuleAddress)
   {
     if (ArtNr == ARTNR && ModuleAddress == lncv[0])
     {
+      #ifdef DEBUG
+      Serial.print("LNCV PROGRAMMING STOP: ");
+      Serial.print(ArtNr);Serial.print("-");Serial.println(ModuleAddress);
+      #endif
       modeProgramming = false;
       commitLNCVUpdate();
     }
@@ -415,8 +423,27 @@ void notifySwitchRequest( uint16_t Address, uint8_t Output, uint8_t Direction )
   }
   if (Address == lncv[LNCV_PLAYRANDOM])
   {
-    MP3playMode(MP3_MODERANDOM);
-    MP3playFile(2);
+    //Not if sound in progress
+    if (MP3isPlaying()) return;
+
+    //Search for a background sound
+    int counter=0;
+    randomSeed(millis());
+    int rndnumber=random(1, lncv[LNCV_NUMSOUNDS]);
+    
+    do {
+      rndnumber=random(1, lncv[LNCV_NUMSOUNDS]);
+      counter++;
+    } while ((lncv[LNCV_SNDCFG_OFFSET+rndnumber] & 0x100==0) && counter<30);
+    
+    if (counter>30) return;
+
+    #ifdef DEBUG
+    Serial.print("Playing random sound # ");
+    Serial.println(rndnumber+1);    
+    #endif
+    
+    MP3playFile(rndnumber+1);
   } 
 }
 
@@ -537,9 +564,10 @@ void resetSettings()
   for (i = 1; i < 17; i++) lncv[i] = i;
   for (i = 17; i < 33; i++) lncv[i] = 1;
   lncv[18] = 4; lncv[20] = 4; lncv[21] = 4; lncv[22] = 4; lncv[23] = 4; lncv[24] = 4; //Salidas posibles con fade
-  lncv[33] = 255; lncv[34] = 10; // intensidad y velocidad fade
-  lncv[35] = 0; lncv[36] = 0; lncv[37] = 15;  lncv[38] = 1; lncv[39] = 50; //Config MP3, sin sonidos, volumen 15, SPI, salida STOP
-  lncv[40] = 51;
+  for (i = 33; i < 40; i++) lncv[i] = 255; //intensidades fade
+  lncv[40] = 5; //velocidad fade
+  lncv[41] = 0; lncv[42] = 0; lncv[43] = 15;  lncv[44] = 1; lncv[45] = 0; //Config MP3, sin sonidos, volumen 15, SPI, salida STOP
+  lncv[46] = 0;
   for (i = 50; i<80; i++) lncv[i]=0;
 
   saveSettings();
@@ -596,42 +624,46 @@ void setOutput(uint8_t pOut, boolean pState)
     case 2: // Pulse Thrown
     case 3: // Pulse Straight
       digitalWrite(myPins[pOut - 1], HIGH);
-      delay(150);
+      delay(100);
       digitalWrite(myPins[pOut - 1], LOW);
       break;
     case 4: // Fade
       if (pState)
       {
-        for (intens = 0; intens <= lncv[33]; intens += 1)
+        if (analogRead(myPins[pOut-1]>0)) break;
+        for (intens = 0; intens <= lncv[29+pOut]; intens += 1)
         {
           analogWrite(myPins[pOut - 1], intens);
-          delay(lncv[34]);
+          delay(lncv[LNCV_FADESPEED]);
         }
       }
       else
       {
-        for (intens = lncv[33]; intens >= 0; intens -= 1)
+        if (analogRead(myPins[pOut-1]==0)) break;
+        for (intens = lncv[29+pOut]; intens >= 0; intens -= 1)
         {
           analogWrite(myPins[pOut - 1], intens);
-          delay(lncv[34]);
+          delay(lncv[LNCV_FADESPEED]);
         }
       }
       break;
     case 5: // Fade invertido
       if (!pState)
       {
-        for (intens = 0; intens <= lncv[33]; intens += 1)
+        if (analogRead(myPins[pOut-1]>0)) break;
+        for (intens = 0; intens <= lncv[29+pOut]; intens += 1)
         {
           analogWrite(myPins[pOut - 1], intens);
-          delay(lncv[34]);
+          delay(lncv[LNCV_FADESPEED]);
         }
       }
       else
       {
-        for (intens = lncv[33]; intens >= 0; intens -= 1)
+        if (analogRead(myPins[pOut-1]==0)) break;
+        for (intens = lncv[29+pOut]; intens >= 0; intens -= 1)
         {
           analogWrite(myPins[pOut - 1], intens);
-          delay(lncv[34]);
+          delay(lncv[LNCV_FADESPEED]);
         }
       }      
       break;
