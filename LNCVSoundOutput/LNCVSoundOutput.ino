@@ -26,13 +26,15 @@
  *
  * VERSION 8
  * Configurable intensity for each fade output
- * Check if output already ON or OFF to skyp fade if necessary
+ * Playing the sound that you are configuring to identify them
+ * 8.1 Bug fixing, fade not working
+ * When breaking a sound it continues after
  ******************************************************************************/
 // uncomment this to debug
 #define DEBUG
 
 #define MAJORVERSION 8
-#define MINORVERSION 0
+#define MINORVERSION 1
 
 #define LOCONET_TX_PIN 7
 #define ARTNR 9001
@@ -75,14 +77,16 @@ uint8_t myPins[] = {2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19};
 void setup()
 {
   uint8_t i = 0;
+
+  delay(1000);
   
   /*----------------------------------------------*/
   /*  Configuracion Loconet                       */
   /*----------------------------------------------*/
-  LocoNet.init(LOCONET_TX_PIN);
-   
+  LocoNet.init(LOCONET_TX_PIN);  
+  
   /*----------------------------------------------*/
-  /*  Carga la configuración de la aplicacion     */
+  /*  Carga la configuraciÃ³n de la aplicacion     */
   /*----------------------------------------------*/
   loadSettings();  
 
@@ -103,6 +107,8 @@ void setup()
   /*----------------------------------------------*/
   Serial.begin(9600);
 
+  delay(1000);
+  
   if (lncv[LNCV_FIRSTSOUND]>0)
   {
     if (lncv[LNCV_MASTERVOL] > 30) lncv[LNCV_MASTERVOL] = 15;
@@ -294,7 +300,7 @@ int8_t notifyLNCVwrite(uint16_t ArtNr, uint16_t lncvAddress, uint16_t lncvValue)
     if (lncvAddress < LNCV_COUNT)
     {      
       lncv[lncvAddress] = lncvValue;
-      //Si escribimos la dirección asignada a la salida 1, ponemos el resto correlativas
+      //Si escribimos la direcciÃ³n asignada a la salida 1, ponemos el resto correlativas
       if (lncvAddress == 1)
       {
         for (n = 0; n < 16; n++)
@@ -384,7 +390,7 @@ void notifySwitchRequest( uint16_t Address, uint8_t Output, uint8_t Direction )
     }
   }
 
-  //Solo aceptamos señal verde para lanzar el sonido
+  //Solo aceptamos seÃ±al verde para lanzar el sonido
   if (!Direction) return;
 
   //Si no corresponde a un pin miramos si esta asignado a un sonido
@@ -412,8 +418,12 @@ void notifySwitchRequest( uint16_t Address, uint8_t Output, uint8_t Direction )
       MP3playMode(MP3_MODEREPEAT);
     else
       MP3playMode(MP3_MODESINGLE);
-        
-    MP3playFile(direccion + 1);
+
+    if ((MP3_source==MP3_SPI) && !(lncv[LNCV_SNDCFG_OFFSET+direccion] & 0x100))
+      MP3playFileBreak(direccion + 1);
+    else
+      MP3playFile(direccion + 1);
+      
     return;
   }
   if (Address == lncv[LNCV_STOPSOUND])
@@ -501,9 +511,29 @@ void MP3playFile(uint8_t pFileNum)
   cmd_buf[1] = 0x04;          // Length
   cmd_buf[2] = MP3_source;    // Command
   cmd_buf[3] = 0x00;          // file number high byte
-  cmd_buf[4] = pFileNum;    // file number low byte
+  cmd_buf[4] = pFileNum;      // file number low byte
   cmd_buf[5] = 0x7E;          // END
   ArduinoMP3Shield_SendCMD(cmd_buf, 6);
+
+  #ifdef DEBUG
+    Serial.print("Play single");    
+    Serial.print("\n");
+  #endif
+} //end playFile
+
+void MP3playFileBreak(uint8_t pFileNum)
+{
+  cmd_buf[0] = 0x7E;          // START
+  cmd_buf[1] = 0x04;          // Length
+  cmd_buf[2] = 0xAC;          // Command
+  cmd_buf[3] = 0x00;          // file number high byte
+  cmd_buf[4] = pFileNum;      // file number low byte
+  cmd_buf[5] = 0x7E;          // END
+  ArduinoMP3Shield_SendCMD(cmd_buf, 6);
+  #ifdef DEBUG
+    Serial.print("Play break");    
+    Serial.print("\n");
+  #endif
 } //end playFile
 
 void MP3playMode(uint8_t modo)
@@ -630,8 +660,7 @@ void setOutput(uint8_t pOut, boolean pState)
     case 4: // Fade
       if (pState)
       {
-        if (analogRead(myPins[pOut-1]>0)) break;
-        for (intens = 0; intens <= lncv[29+pOut]; intens += 1)
+        for (intens = 0; intens <= lncv[31+pOut]; intens += 1)
         {
           analogWrite(myPins[pOut - 1], intens);
           delay(lncv[LNCV_FADESPEED]);
@@ -639,8 +668,7 @@ void setOutput(uint8_t pOut, boolean pState)
       }
       else
       {
-        if (analogRead(myPins[pOut-1]==0)) break;
-        for (intens = lncv[29+pOut]; intens >= 0; intens -= 1)
+        for (intens = lncv[31+pOut]; intens >= 0; intens -= 1)
         {
           analogWrite(myPins[pOut - 1], intens);
           delay(lncv[LNCV_FADESPEED]);
@@ -650,8 +678,7 @@ void setOutput(uint8_t pOut, boolean pState)
     case 5: // Fade invertido
       if (!pState)
       {
-        if (analogRead(myPins[pOut-1]>0)) break;
-        for (intens = 0; intens <= lncv[29+pOut]; intens += 1)
+        for (intens = 0; intens <= lncv[31+pOut]; intens += 1)
         {
           analogWrite(myPins[pOut - 1], intens);
           delay(lncv[LNCV_FADESPEED]);
@@ -659,8 +686,7 @@ void setOutput(uint8_t pOut, boolean pState)
       }
       else
       {
-        if (analogRead(myPins[pOut-1]==0)) break;
-        for (intens = lncv[29+pOut]; intens >= 0; intens -= 1)
+        for (intens = lncv[31+pOut]; intens >= 0; intens -= 1)
         {
           analogWrite(myPins[pOut - 1], intens);
           delay(lncv[LNCV_FADESPEED]);
@@ -669,4 +695,5 @@ void setOutput(uint8_t pOut, boolean pState)
       break;
   }
 }
+
 
