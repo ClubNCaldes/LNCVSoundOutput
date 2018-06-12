@@ -145,7 +145,9 @@ void loop()
     uint8_t packetConsumed = LocoNet.processSwitchSensorMessage(LnPacket);
     // Si no era un paquete de sensores/switches, probamos si es un LNCV
     if (packetConsumed == 0)
+    {
       packetConsumed = lnCV.processLNCVMessage(LnPacket);
+    }
   }
   
   while (Serial.available()>0) Serial.read(); // discard mp3 answers
@@ -182,8 +184,7 @@ int8_t notifyLNCVread(uint16_t ArtNr, uint16_t lncvAddress, uint16_t, uint16_t &
         lncvValue = lncv[lncvAddress];
         #ifdef DEBUG
           Serial.print(" LNCV Value: ");
-          Serial.print(lncvValue);
-          Serial.print("\n");
+          Serial.println(lncvValue);
         #endif
         
         //if sound config lncv play this sound to identify it
@@ -203,7 +204,7 @@ int8_t notifyLNCVread(uint16_t ArtNr, uint16_t lncvAddress, uint16_t, uint16_t &
       {
         // Invalid LNCV address, request a NAXK
         #ifdef DEBUG
-        Serial.print(" Invalid LNCV addres\n");
+        Serial.println(" Invalid LNCV addres");
         #endif
         return LNCV_LACK_ERROR_UNSUPPORTED;
       }
@@ -211,7 +212,7 @@ int8_t notifyLNCVread(uint16_t ArtNr, uint16_t lncvAddress, uint16_t, uint16_t &
     else
     {
       #ifdef DEBUG
-      Serial.print("ArtNr invalid.\n");
+      Serial.println("ArtNr invalid.");
       #endif
       return -1;
     }
@@ -219,7 +220,7 @@ int8_t notifyLNCVread(uint16_t ArtNr, uint16_t lncvAddress, uint16_t, uint16_t &
   else
   {
     #ifdef DEBUG
-    Serial.print("Ignoring Request.\n");
+    Serial.println("Ignoring Request.");
     #endif
     return -1;
   }
@@ -238,7 +239,7 @@ int8_t notifyLNCVprogrammingStart(uint16_t & ArtNr, uint16_t & ModuleAddress)
     if (ModuleAddress == lncv[0])
     {
       #ifdef DEBUG
-      Serial.print("Module Addr. OK \n");
+      Serial.println("Module Addr. OK");
       #endif
       modeProgramming = true;
       return LNCV_LACK_OK;
@@ -265,7 +266,7 @@ int8_t notifyLNCVwrite(uint16_t ArtNr, uint16_t lncvAddress, uint16_t lncvValue)
   #ifdef DEBUG
     Serial.print("LNCV WRITE (LNCV ");
     Serial.print(lncvAddress); Serial.print(" = "); Serial.print(lncvValue);
-    Serial.print("): ");
+    Serial.println(")");
   #endif
 
   if (ArtNr == ARTNR)
@@ -383,7 +384,7 @@ void notifySwitchRequest( uint16_t Address, uint8_t Output, uint8_t Direction )
     {
       #ifdef DEBUG
         Serial.print("CHANGE OUTPUT "); Serial.print(i, DEC);
-        Serial.print(", PIN "); Serial.print(myPins[i - 1], DEC);
+        Serial.print(", PIN "); Serial.println(myPins[i - 1], DEC);
       #endif
       Direction ? setOutput(i, true) : setOutput(i, false);
       return;
@@ -401,11 +402,16 @@ void notifySwitchRequest( uint16_t Address, uint8_t Output, uint8_t Direction )
       Serial.println(Address - lncv[LNCV_FIRSTSOUND] + 1);
     #endif
     int direccion = Address - lncv[LNCV_FIRSTSOUND];
-
+    bool isPlaying=MP3isPlaying();
+      
     // If playing and low priority skip command
-    if (MP3isPlaying() && (lncv[LNCV_SNDCFG_OFFSET+direccion] & 0x100))
+    if (isPlaying && (lncv[LNCV_SNDCFG_OFFSET+direccion] & 0x100))
+    {
+      #ifdef DEBUG
+      Serial.println("Is playing and background sound, skip play");
+      #endif
       return;
-    
+    }
     // If volume set
     int mp3volume=(lncv[LNCV_SNDCFG_OFFSET+direccion] & 0xFF);
     if (mp3volume>0)
@@ -419,10 +425,21 @@ void notifySwitchRequest( uint16_t Address, uint8_t Output, uint8_t Direction )
     else
       MP3playMode(MP3_MODESINGLE);
 
-    if ((MP3_source==MP3_SPI) && !(lncv[LNCV_SNDCFG_OFFSET+direccion] & 0x100))
+    //If playing from SPI (and sound is not background, previous if)
+    if (isPlaying && MP3_source==MP3_SPI)
+    { 
+      #ifdef DEBUG
+      Serial.println("Playbreak, is playing and priority sound");
+      #endif 
       MP3playFileBreak(direccion + 1);
+    }
     else
+    {
+      #ifdef DEBUG
+      Serial.println("Play normal");
+      #endif
       MP3playFile(direccion + 1);
+    }
       
     return;
   }
